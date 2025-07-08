@@ -63,9 +63,8 @@ typedef struct
 int32_t get_kernel_info(kernel_info_t *kinfo, const char *img, int32_t imglen)
 {
     kinfo->is_be = 0;
-    kinfo->arch = ARCH_UNKNOWN;
+    kinfo->arch = 0;
 
-    // 检测ARM32内核
     if (imglen > 0x28) {
         uint32_t arm32_magic = *(uint32_t *)(img + 0x24);
         if (u32le(arm32_magic) == ARM32_MAGIC) {
@@ -74,11 +73,11 @@ int32_t get_kernel_info(kernel_info_t *kinfo, const char *img, int32_t imglen)
             kinfo->load_offset = 0;
             kinfo->kernel_size = u32le(hdr->end) - u32le(hdr->start);
             kinfo->primary_entry_offset = 0;
+            kinfo->page_shift = 12;
             return 0;
         }
     }
 
-    // 检测ARM64内核
     arm64_hdr_t *khdr = (arm64_hdr_t *)img;
     if (strncmp(khdr->magic, KERNEL_MAGIC, strlen(KERNEL_MAGIC))) {
         tools_loge_exit("kernel image magic error: %s\n", khdr->magic);
