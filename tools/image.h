@@ -8,7 +8,9 @@
 
 #include <stdint.h>
 
-// /arch/arm64/kernel/head.S
+// 添加架构定义
+#define ARCH_ARM32 1
+#define ARCH_ARM64 2
 
 typedef struct
 {
@@ -19,6 +21,8 @@ typedef struct
     int32_t page_shift;
     int32_t b_stext_insn_offset;
     int32_t primary_entry_offset;
+    // 添加架构字段
+    int32_t arch;
 } kernel_info_t;
 
 int32_t get_kernel_info(kernel_info_t *kinfo, const char *img, int32_t imglen);
