@@ -14,55 +14,77 @@
 
 #define EFI_MAGIC_SIG "MZ"
 #define KERNEL_MAGIC "ARM\x64"
+#define ARM32_MAGIC 0x016f2818
 
 typedef struct
 {
     union _entry
     {
-        // #ifdef CONFIG_EFI
         struct _efi
         {
-            uint8_t mz[4]; // "MZ" signature required by UEFI.
-            uint32_t b_insn; // branch to kernel start, magic
+            uint8_t mz[4];
+            uint32_t b_insn;
         } efi;
-        // #else
         struct _nefi
         {
-            uint32_t b_insn; // branch to kernel start, magic
+            uint32_t b_insn;
             uint32_t reserved0;
         } nefi;
-        // #endif
     } hdr;
 
-    uint64_t kernel_offset; // Image load load_offset from start of RAM, little-endian
-    uint64_t kernel_size_le; // Effective size of kernel image, little-endian
-    uint64_t kernel_flag_le; // Informative flags, little-endian
+    uint64_t kernel_offset;
+    uint64_t kernel_size_le;
+    uint64_t kernel_flag_le;
 
     uint64_t reserved0;
     uint64_t reserved1;
     uint64_t reserved2;
 
-    char magic[4]; // Magic number "ARM\x64"
+    char magic[4];
 
     union _pe
     {
-        // #ifdef CONFIG_EFI
-        uint64_t pe_offset; // Offset to the PE header.
-        // #else
+        uint64_t pe_offset;
         uint64_t npe_reserved;
-        // #endif
     } pe;
 } arm64_hdr_t;
+
+typedef struct
+{
+    uint32_t magic;
+    uint32_t start;
+    uint32_t end;
+    uint32_t kernel_end;
+    uint32_t got_start;
+    uint32_t got_end;
+    uint32_t decomp_offset;
+} arm32_hdr_t;
 
 int32_t get_kernel_info(kernel_info_t *kinfo, const char *img, int32_t imglen)
 {
     kinfo->is_be = 0;
+    kinfo->arch = ARCH_UNKNOWN;
 
+    // 检测ARM32内核
+    if (imglen > 0x28) {
+        uint32_t arm32_magic = *(uint32_t *)(img + 0x24);
+        if (u32le(arm32_magic) == ARM32_MAGIC) {
+            kinfo->arch = ARCH_ARM32;
+            arm32_hdr_t *hdr = (arm32_hdr_t *)(img + 0x24);
+            kinfo->load_offset = 0;
+            kinfo->kernel_size = u32le(hdr->end) - u32le(hdr->start);
+            kinfo->primary_entry_offset = 0;
+            return 0;
+        }
+    }
+
+    // 检测ARM64内核
     arm64_hdr_t *khdr = (arm64_hdr_t *)img;
     if (strncmp(khdr->magic, KERNEL_MAGIC, strlen(KERNEL_MAGIC))) {
         tools_loge_exit("kernel image magic error: %s\n", khdr->magic);
     }
 
+    kinfo->arch = ARCH_ARM64;
     kinfo->uefi = !strncmp((const char *)khdr->hdr.efi.mz, EFI_MAGIC_SIG, strlen(EFI_MAGIC_SIG));
 
     uint32_t b_primary_entry_insn;
@@ -93,31 +115,27 @@ int32_t get_kernel_info(kernel_info_t *kinfo, const char *img, int32_t imglen)
     if (kinfo->is_be) tools_loge_exit("kernel unexpected arm64 big endian img\n");
 
     switch ((flag & 0b0110) >> 1) {
-    case 2: // 16k
+    case 2:
         kinfo->page_shift = 14;
         break;
-    case 3: // 64k
+    case 3:
         kinfo->page_shift = 16;
         break;
-    case 1: // 4k
+    case 1:
     default:
         kinfo->page_shift = 12;
     }
-
-    tools_logi("kernel image_size: 0x%08x\n", imglen);
-    tools_logi("kernel uefi header: %s\n", kinfo->uefi ? "true" : "false");
-    tools_logi("kernel load_offset: 0x%08x\n", kinfo->load_offset);
-    tools_logi("kernel kernel_size: 0x%08x\n", kinfo->kernel_size);
-    tools_logi("kernel page_shift: %d\n", kinfo->page_shift);
 
     return 0;
 }
 
 int32_t kernel_resize(kernel_info_t *kinfo, char *img, int32_t size)
 {
-    arm64_hdr_t *khdr = (arm64_hdr_t *)img;
-    uint64_t ksize = size;
-    if (is_be() ^ kinfo->is_be) ksize = u64swp(size);
-    khdr->kernel_size_le = ksize;
+    if (kinfo->arch == ARCH_ARM64) {
+        arm64_hdr_t *khdr = (arm64_hdr_t *)img;
+        uint64_t ksize = size;
+        if (is_be() ^ kinfo->is_be) ksize = u64swp(size);
+        khdr->kernel_size_le = ksize;
+    }
     return 0;
 }
